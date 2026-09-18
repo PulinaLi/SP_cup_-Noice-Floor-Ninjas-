@@ -1,0 +1,6 @@
+outs:
+- md5: d44d5c8b59a3c3d6d5a24a32578460d9.dir
+  size: 1087352873
+  nfiles: 501
+  hash: md5
+  path: competition_data
