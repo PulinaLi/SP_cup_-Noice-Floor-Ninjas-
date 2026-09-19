@@ -1,0 +1,55 @@
+<style>body { font-family: Arial; margin: 40px; } table { border-collapse: collapse; width: 100%; margin-bottom: 20px; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; } th { background-color: #f2f2f2; }</style><h1>Mora SP Cup 2026 - Comprehensive Project Report</h1>
+<p><strong>Team Name:</strong> Noise Floor Ninjas<br />
+<strong>Date:</strong> September 19, 2026</p>
+<hr />
+<h2>1. Introduction</h2>
+<p>This document serves as a comprehensive log of the entire developmental journey, architectural iterations, and experimental methodologies our team employed for the Mora SP Cup 2026 Image Denoising challenge. Our goal was to push the boundaries of extreme low-light synthetic noise restoration while strictly adhering to VRAM and computational constraints. </p>
+<p>Over the course of the project, we experimented with multiple state-of-the-art architectures, from Convolutional Neural Networks (CNNs) to Vision Transformers, and implemented ensemble strategies to maximize our final composite score (Delta PSNR + Delta SSIM).</p>
+<hr />
+<h2>2. The Core Problem &amp; Domain Shift Fix</h2>
+<p>Early in our process, we discovered a critical issue: <strong>Domain Shift</strong>. 
+Initially, we attempted to apply classical denoising filters (like Bilateral and Non-Local Means) <em>before</em> feeding the images into our deep learning models. This severely confused the neural networks, as they were trained on pure, mathematically generated synthetic noise, but were being fed images that were already blurred and artifact-laden by the classical filters. </p>
+<p><strong>The Solution:</strong> We inverted the pipeline. We fed the raw, noisy <code>float32</code> tensors directly into our deep learning models first. Then, we applied a cascade of classical filters as a <em>post-processing</em> polish. This instantly unlocked our ability to score above 0.60.</p>
+<hr />
+<h2>3. Architectural Iterations &amp; Experiments</h2>
+<p>We aggressively iterated through several AI architectures to find the optimal balance between edge preservation and noise suppression.</p>
+<h3>Iteration 1: NAFNet (Nonlinear Activation Free Network)</h3>
+<p>Our first major success was implementing NAFNet. By removing complex non-linear activation functions and relying on SimpleGate blocks, NAFNet proved to be incredibly computationally efficient. 
+- <strong>Validation Score:</strong> 0.6434 Composite.
+- <strong>Outcome:</strong> A massive success. This formed the baseline for our <code>TeamName.zip</code> submission.</p>
+<h3>Iteration 2: Attention U-Net</h3>
+<p>To try and beat the NAFNet, we built a custom Attention U-Net. This architecture utilized attention gates in the skip connections to help the network focus specifically on structural edges rather than background variance. 
+- <strong>Validation Score:</strong> 0.577 Composite.
+- <strong>Outcome:</strong> While it sharpened edges beautifully, it struggled with the heavy noise floor variance compared to NAFNet. </p>
+<h3>Iteration 3: The Ensemble Strategy</h3>
+<p>To leverage the strengths of both models, we built an inference script that ran noisy images through <em>both</em> the NAFNet and the Attention U-Net simultaneously. We then mathematically fused their outputs (weighting NAFNet at 60% and U-Net at 40%).
+- <strong>Outcome:</strong> A robust output that smoothed the heavy noise while sharpening the edges, proving the viability of model ensembling. </p>
+<h3>Final Architecture: Lightweight Restormer (State-of-the-Art)</h3>
+<p>For our final, ultimate push, we discarded CNNs entirely and implemented a Vision Transformer: the <strong>Restormer</strong>. 
+Because Transformers require massive amounts of VRAM, we custom-engineered a lightweight Restormer specifically tailored to train on a 6GB RTX 4050 GPU by optimizing channel widths and blocks.
+- <strong>MDTA (Multi-Dconv Head Transposed Attention):</strong> Captures global image dependencies across feature channels rather than spatial dimensions.
+- <strong>GDFN (Gated-Dconv Feed-Forward Network):</strong> Enhances informative features while suppressing noisy activations.
+- <strong>Validation Score:</strong> <strong>0.6467 Composite.</strong>
+- <strong>Outcome:</strong> Our highest score yet. The Restormer successfully surpassed all previous models and ensembles.</p>
+<hr />
+<h2>4. The Classical Post-Processing Cascade</h2>
+<p>Regardless of which deep learning engine we used, every image went through our custom post-processing filter cascade to eliminate any remaining statistical anomalies:</p>
+<ol>
+<li><strong>Adaptive Defect Correction:</strong> Eliminates isolated "hot" or "dead" pixels caused by the sensor limits.</li>
+<li><strong>Wavelet Denoising (db4, level 1):</strong> Soft-thresholding applied to high-frequency subbands to remove granular high-frequency noise.</li>
+<li><strong>Bilateral Filtering (d=5, sigma=25):</strong> A final edge-preserving smoothing pass to completely flatten the variance in uniform dark areas, satisfying the aesthetic requirement for a "clean" image.</li>
+</ol>
+<hr />
+<h2>5. Final Submissions &amp; Checksums</h2>
+<p>We have prepared two highly competitive submissions based on this developmental journey. </p>
+<p><strong>Submission 1: The Original Baseline (TeamName.zip)</strong>
+- <strong>Architecture:</strong> NAFNet + Post-Processing
+- <strong>Composite Score:</strong> 0.6434
+- <strong>Model File:</strong> <code>best_model.pth</code></p>
+<p><strong>Submission 2: The Final Push (Restormer_Submission.zip)</strong>
+- <strong>Architecture:</strong> Lightweight Restormer + Post-Processing
+- <strong>Composite Score:</strong> 0.6467 (Highest)
+- <strong>Model File:</strong> <code>restormer_best.pth</code>
+- <strong>Model Checkpoint SHA-256:</strong> <code>318288c2f370806da3fd5762f4b4adcae7c3e8f332e60b18dfb6e719f2e652ac</code></p>
+<p><strong>Codebase Checksum:</strong>
+- <strong>Git Commit Hash:</strong> <code>16d28b1f3264aa90d69a9a33f37fa9c70a7f97e0</code></p>

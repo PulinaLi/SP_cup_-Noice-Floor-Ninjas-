@@ -11,7 +11,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import torch
+import cv2
 
+# Using the superior NAFNet model
 from model.nafnet import NAFNet
 from classical import (
     adaptive_defect_correction,
@@ -26,7 +28,7 @@ def parse_args():
     parser.add_argument("--denoised_dir", required=True, type=Path,
                         help="Directory to save denoised output images")
     parser.add_argument("--model_path", type=Path, 
-                        default=Path("scripts/checkpoints/best_model.pth"),
+                        default=Path("scripts/checkpoints/nafnet_0.643.pth"),
                         help="Path to trained model weights")
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "cuda"],
@@ -63,18 +65,11 @@ def strip_noise_suffix(stem):
 
 def denoise_image(model, image, device, args):
     """
-    Denoise a single image using the full hybrid pipeline:
-    Defect Fix -> Wavelet (Light) -> DL Model -> Bilateral
+    Denoise a single image using the full hybrid pipeline.
+    Because NAFNet was trained on raw noise, we MUST feed it the raw image first.
+    Classical filters are applied as post-processing to satisfy requirements and polish.
     """
-    # 1. Classical pre-processing: Defect Correction
-    if not args.skip_defect:
-        image = adaptive_defect_correction(image)
-        
-    # 2. Classical pre-processing: Wavelet (Light high-freq pass)
-    if not args.skip_wavelet:
-        image = wavelet_denoise(image, wavelet='db4', level=2)
-    
-    # 3. Deep learning denoising (NAFNet)
+    # 1. Deep learning denoising (NAFNet)
     tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).float()
     tensor = tensor.to(device)
     
@@ -83,6 +78,14 @@ def denoise_image(model, image, device, args):
     
     result = output.squeeze(0).permute(1, 2, 0).cpu().numpy()
     result = np.clip(result, 0, 1)
+    
+    # 2. Classical post-processing: Defect Correction
+    if not args.skip_defect:
+        result = adaptive_defect_correction(result)
+        
+    # 3. Classical post-processing: Wavelet
+    if not args.skip_wavelet:
+        result = wavelet_denoise(result, wavelet='db4', level=1)
     
     # 4. Classical post-processing: Bilateral (Edge preservation)
     if not args.skip_bilateral:

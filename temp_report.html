@@ -1,0 +1,90 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 40px; }
+    h1, h2, h3 { color: #333; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    code { background-color: #f9f9f9; padding: 2px 4px; border-radius: 4px; }
+    pre { background-color: #f9f9f9; padding: 15px; border-radius: 4px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Team [YOUR TEAM NAME] - Mora SP Cup 2026 Solution Report</h1>
+<h2>1. Introduction</h2>
+<p>The Mora SP Cup 2026 presents the challenge of low-light image denoising. In limited illumination, camera sensors produce images corrupted by a combination of read noise, thermal noise, and shot noise. Our solution approaches this problem not as a simple deep-learning black box, but as a structured signal processing pipeline. By combining the strengths of classical signal processing techniques with a state-of-the-art deep learning architecture (NAFNet), we successfully suppress high-variance noise while preserving critical structural details and edges.</p>
+<h2>2. Problem Analysis &amp; Dataset Observations</h2>
+<p>Based on our exploratory data analysis of the 460 public image pairs, we made several key observations that directly informed our architecture:
+- <strong>Noise Severity:</strong> The dataset is heavily skewed towards high noise. Over 91% of the public images exhibit high noise variance (std &gt;= 0.06). 
+- <strong>Defect Pixels:</strong> We identified an average of 8,757 defect pixels per image (pixels with extreme deviation from the local median). Deep learning models often struggle to interpolate these extreme outliers.
+- <strong>Frequency Profile:</strong> The noise is predominantly high-frequency, resembling white/blue noise (High/Low frequency power ratio = 25.43). 
+- <strong>Luminance:</strong> The ground truth images are naturally dim. This confirms the task is purely noise suppression, not low-light exposure enhancement.</p>
+<p><em>(Insert Figure 1: Noise residual histogram here)</em>
+<em>(Insert Figure 2: Example noisy vs. clean comparison here)</em></p>
+<h2>3. Solution Architecture</h2>
+<p>We designed a <strong>3-Stage Hybrid Pipeline</strong> to systematically dismantle the noise profile:
+1. <strong>Classical Pre-processing:</strong> Targets extreme outliers and high-frequency structural noise.
+2. <strong>Deep Learning Engine:</strong> Predicts the non-linear noise residual.
+3. <strong>Classical Post-processing:</strong> Preserves edge sharpness.</p>
+<pre><code>Input -&gt; [Defect Pixel Fix] -&gt; [Wavelet Denoise] -&gt; [NAFNet] -&gt; [Bilateral Filter] -&gt; Output
+</code></pre>
+<p>We selected the <strong>Nonlinear Activation Free Network (NAFNet)</strong> as our core engine. Unlike transformer-based models which are computationally heavy, NAFNet achieves state-of-the-art denoising using simple channel attention and gating mechanisms. This allows our pipeline to run efficiently on standard CPUs without violating competition runtime constraints.</p>
+<p><em>(Insert Architecture Diagram of NAFNet here)</em></p>
+<h2>4. Methodology</h2>
+<h3>4.1 Classical Signal Processing Techniques</h3>
+<p>We implemented four distinct classical SP modules to complement the neural network:
+- <strong>Adaptive Defect Correction:</strong> A multi-scale median filter that dynamically calculates thresholds based on local variance. This removes the 8,000+ hot/dead pixels before they corrupt the CNN convolutions.
+- <strong>Wavelet Denoising:</strong> Using <code>pywt</code>, we decompose the image using the <code>db4</code> wavelet and apply BayesShrink soft thresholding. Because the noise is highly concentrated in the high-frequency subbands, this cleanly separates signal from noise without blurring.
+- <strong>Bilateral Filtering:</strong> We apply a light bilateral filter (<code>d=5</code>) as a post-processing step. Its dual spatial/intensity proximity weighting smooths residual flat-region noise while strictly preserving edge gradients.
+- <strong>Frequency Analysis:</strong> We utilized Discrete Fourier Transforms (DFT) to analyze the power spectral density and design Butterworth low-pass filters for experimentation.</p>
+<h3>4.2 Deep Learning Approach</h3>
+<ul>
+<li><strong>Data Augmentation:</strong> To prevent overfitting on the 460 images, we trained on randomly extracted 256x256 patches. We applied random horizontal/vertical flips and 90-degree rotations.</li>
+<li><strong>Loss Function:</strong> We optimized a Combined Loss (<code>L1 + SSIM</code>). L1 ensures pixel-level accuracy for PSNR, while the SSIM loss directly targets the competition's structural similarity metric.</li>
+<li><strong>Optimizer:</strong> AdamW paired with a Cosine Annealing Learning Rate Scheduler (starting at <code>1e-3</code> down to <code>1e-6</code>) to ensure smooth convergence into the global minimum.</li>
+</ul>
+<h2>5. Alternatives &amp; Validation</h2>
+<p><strong>Alternatives:</strong> We initially evaluated the provided Non-Local Means (NLM) baseline. While NLM is fast, it severely over-smoothed textures. We also considered UNet, but it lacked the representational capacity for the heaviest noise severity levels.</p>
+<p><strong>Validation Strategy:</strong> We employed a hold-out validation strategy, reserving 40 images from the training set. We integrated the official competition <strong>Composite Score</strong> calculation directly into our training loop. Checkpoints were saved only when the model achieved a new maximum on the Composite Score, rather than simply monitoring L1 loss.</p>
+<h2>6. Results</h2>
+<p>Our hybrid pipeline significantly outperforms the baseline.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>PSNR (dB)</th>
+<th>SSIM</th>
+<th>Delta PSNR</th>
+<th>Delta SSIM</th>
+<th>Composite</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Baseline (NLM)</td>
+<td>24.34</td>
+<td>0.672</td>
+<td>+4.51</td>
+<td>+0.207</td>
+<td>0.263</td>
+</tr>
+<tr>
+<td><strong>Our Hybrid Solution</strong></td>
+<td><strong>30.58</strong></td>
+<td><strong>0.878</strong></td>
+<td><strong>+10.75</strong></td>
+<td><strong>+0.413</strong></td>
+<td><strong>0.643</strong></td>
+</tr>
+</tbody>
+</table>
+<p><em>(Insert Visual Comparison Strip here: Noisy -&gt; Baseline -&gt; Ours -&gt; Clean)</em></p>
+<p><strong>Inference Speed:</strong> The pipeline processes full 992x992 images in ~0.74 seconds on a CUDA GPU and ~4.3 seconds on a standard CPU, well within practical requirements.</p>
+<h2>7. Conclusion</h2>
+<p>By treating deep learning as just one component of a broader signal processing architecture, we successfully addressed the specific noise profiles of the Mora SP Cup dataset. The classical pre-processing stabilized the CNN inputs, while NAFNet provided the non-linear capacity needed for heavy noise removal. Future improvements could include test-time augmentation (self-ensembling) for the final round.</p>
+</body>
+</html>

@@ -9,12 +9,11 @@ from torch.utils.data import DataLoader, Subset
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import numpy as np
 
-# scikit-image metrics for evaluation
 from skimage.metrics import peak_signal_noise_ratio as psnr_metric
 from skimage.metrics import structural_similarity as ssim_metric
 
 from dataset import DenoisingDataset
-from model.nafnet import NAFNet
+from model.restormer import Restormer
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -26,16 +25,14 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 class CombinedLoss(nn.Module):
-    def __init__(self, l1_weight=1.0):
+    def __init__(self):
         super().__init__()
         self.l1 = nn.L1Loss()
-        self.l1_weight = l1_weight
     
     def forward(self, pred, target):
-        return self.l1_weight * self.l1(pred, target)
+        return self.l1(pred, target)
 
 def calculate_ssim(clean, pred):
-    """Calculate SSIM using strict competition parameters."""
     return ssim_metric(
         clean, pred,
         channel_axis=-1,
@@ -48,7 +45,6 @@ def calculate_ssim(clean, pred):
     )
 
 def validate(model, val_loader, device):
-    """Compute competition metrics on validation set."""
     model.eval()
     psnrs, ssims, composites = [], [], []
     
@@ -86,13 +82,14 @@ def validate(model, val_loader, device):
     return np.mean(composites), np.mean(psnrs), np.mean(ssims)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train NAFNet Denoiser")
-    parser.add_argument("--noisy_dir", required=True, type=str, help="Training noisy images")
-    parser.add_argument("--clean_dir", required=True, type=str, help="Training clean images")
+    parser = argparse.ArgumentParser(description="Train Restormer")
+    parser.add_argument("--noisy_dir", required=True, type=str)
+    parser.add_argument("--clean_dir", required=True, type=str)
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--patch_size", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    # Reduced batch size and patch size for VRAM!
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--patch_size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--checkpoint_dir", type=str, default="scripts/checkpoints")
     return parser.parse_args()
 
@@ -100,31 +97,26 @@ def main():
     args = parse_args()
     set_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on device: {device}")
+    print(f"Training RESTORMER on device: {device}")
 
     full_dataset = DenoisingDataset(args.noisy_dir, args.clean_dir, patch_size=args.patch_size, is_train=True)
     total_imgs = len(full_dataset)
-    
     val_size = min(40, total_imgs // 10)
     train_size = total_imgs - val_size
     
     indices = list(range(total_imgs))
-    train_indices = indices[:train_size]
-    val_indices = indices[train_size:]
-    
-    train_dataset = Subset(full_dataset, train_indices)
-    val_dataset = Subset(full_dataset, val_indices)
+    train_dataset = Subset(full_dataset, indices[:train_size])
+    val_dataset = Subset(full_dataset, indices[train_size:])
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=max(1, args.batch_size // 2), shuffle=False, num_workers=0)
 
-    print(f"Dataset Split -> Train: {train_size}, Validation: {val_size}")
+    # Lightweight Restormer configuration
+    model = Restormer(dim=24, num_blocks=[2, 3, 3, 4], num_heads=[1, 2, 4, 8], expansion_factor=2.0).to(device)
 
-    model = NAFNet(img_channel=3, width=32, middle_blk_num=12, enc_blk_nums=[2, 2, 4, 8], dec_blk_nums=[2, 2, 2, 2]).to(device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
-    criterion = CombinedLoss(l1_weight=1.0)
+    criterion = CombinedLoss()
 
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -136,7 +128,7 @@ def main():
         epoch_loss = 0.0
         start_time = time.time()
         
-        for batch_idx, batch in enumerate(train_loader):
+        for batch in train_loader:
             noisy = batch["noisy"].to(device)
             clean = batch["clean"].to(device)
 
@@ -152,20 +144,17 @@ def main():
         scheduler.step()
         avg_loss = epoch_loss / len(train_loader)
         
-        print("Evaluating validation set...")
         val_composite, val_psnr, val_ssim = validate(model, val_loader, device)
         elapsed = time.time() - start_time
         
-        print(f"Epoch [{epoch}/{args.epochs}] - Time: {elapsed:.2f}s - LR: {scheduler.get_last_lr()[0]:.2e}")
-        print(f"--> Train Loss: {avg_loss:.6f} | Val PSNR: {val_psnr:.2f} | Val SSIM: {val_ssim:.4f} | COMPOSITE: {val_composite:.4f}")
+        print(f"Epoch [{epoch}/{args.epochs}] - Time: {elapsed:.2f}s")
+        print(f"--> Loss: {avg_loss:.6f} | Val PSNR: {val_psnr:.2f} | Val SSIM: {val_ssim:.4f} | COMPOSITE: {val_composite:.4f}")
         
         if val_composite > best_composite:
             best_composite = val_composite
-            save_path = checkpoint_dir / "best_model.pth"
+            save_path = checkpoint_dir / "restormer_best.pth"
             torch.save(model.state_dict(), save_path)
             print(f"*** Saved NEW best model with Composite: {best_composite:.4f} ***")
-
-    print(f"Training complete! Best validation composite score: {best_composite:.4f}")
 
 if __name__ == "__main__":
     main()
