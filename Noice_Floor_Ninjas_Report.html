@@ -175,7 +175,7 @@
 <!-- 1. INTRODUCTION -->
 <h2>1. Introduction</h2>
 <p>
-  Low-light photography produces images heavily corrupted by read noise, thermal noise, and shot noise. The Mora SP Cup 2026 provides 460 paired noisy/clean images (992×992 PNG, RGB) generated via a synthetic low-light noise model. Our task: design a denoising solution that removes these artifacts while preserving image details and structure. Our team designed a <strong>three-stage hybrid pipeline</strong> combining classical signal processing (adaptive defect correction, wavelet denoising, bilateral filtering) with a NAFNet deep learning denoiser, achieving a composite score of <strong>0.643</strong> — a 2.44× improvement over the NLM baseline (0.263).
+  Low-light photography produces images heavily corrupted by read noise, thermal noise, and shot noise. The Mora SP Cup 2026 provides 460 paired noisy/clean images (992×992 PNG, RGB) generated via a synthetic low-light noise model. Our task: design a denoising solution that removes these artifacts while preserving image details and structure. Our team developed two competitive submissions: a <strong>hybrid classical-DL pipeline</strong> (adaptive defect correction + wavelet denoising + NAFNet + bilateral filtering) scoring <strong>0.643</strong>, and a <strong>lightweight Restormer</strong> (Vision Transformer) scoring <strong>0.6467</strong> — our highest result and a 2.46× improvement over the NLM baseline (0.263).
 </p>
 
 <!-- 2. PROBLEM ANALYSIS -->
@@ -276,7 +276,9 @@
   <tr><td>Bilateral-only</td><td>Implemented</td><td>Edge-preserving but insufficient for high-σ (≥0.06) images.</td></tr>
   <tr><td>Wavelet-only</td><td>Tested</td><td>Good for high-freq noise; alone insufficient for σ≥0.10.</td></tr>
   <tr><td>Butterworth/Wiener</td><td>Implemented</td><td>Ringing artifacts; used for analysis, not standalone denoising.</td></tr>
-  <tr><td>Restormer</td><td>Considered</td><td>Excellent quality but prohibitively slow on CPU (transformer attention).</td></tr>
+  <tr><td>Attention U-Net</td><td>Implemented</td><td>0.577 composite. Sharpened edges well but struggled with heavy noise floor variance.</td></tr>
+  <tr><td>NAFNet + Ensemble (NAFNet 60% + U-Net 40%)</td><td>Implemented</td><td>Robust fusion — smoother noise suppression with sharper edges. Informed final pipeline.</td></tr>
+  <tr><td>Restormer (lightweight, custom-engineered)</td><td><strong>Implemented ✓</strong></td><td><strong>0.6467 composite</strong> — our highest score. MDTA captures global channel dependencies; GDFN gates noisy activations. Trained on RTX 4050 (6 GB VRAM) with optimized channel widths.</td></tr>
   <tr><td>UNet / DnCNN</td><td>Considered</td><td>Lower capacity than NAFNet for heavy noise; simpler but less effective.</td></tr>
 </table>
 
@@ -299,16 +301,22 @@
   <tr><th>Method</th><th>PSNR (dB)</th><th>SSIM</th><th>ΔPSNR</th><th>ΔSSIM</th><th>Composite</th></tr>
   <tr><td>Noisy Input</td><td>19.83</td><td>0.464</td><td>—</td><td>—</td><td>—</td></tr>
   <tr><td>Baseline (NLM, h=10)</td><td>24.34</td><td>0.672</td><td>+4.51</td><td>+0.207</td><td>0.263</td></tr>
-  <tr class="bold-row"><td>Our Hybrid Pipeline</td><td>30.58</td><td>0.878</td><td>+10.75</td><td>+0.413</td><td>0.643</td></tr>
+  <tr><td>Attention U-Net + Post-Processing</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.577</td></tr>
+  <tr><td>Hybrid Pipeline (NAFNet + Post-Processing)</td><td>30.58</td><td>0.878</td><td>+10.75</td><td>+0.413</td><td>0.643</td></tr>
+  <tr class="bold-row"><td>Lightweight Restormer + Post-Processing</td><td>—</td><td>—</td><td>—</td><td>—</td><td><strong>0.6467</strong> ★ Best</td></tr>
 </table>
-<div class="fig-caption">Table: Performance on 460 public images. Baseline from official evaluation; hybrid from our pipeline via evaluate.py.</div>
+<div class="fig-caption">Table: Performance comparison across all architectures. NAFNet and Restormer results on 460-image public set via evaluate.py. Restormer is our highest-scoring submission.</div>
 
 <p>
-  Our pipeline achieves <strong class="metric-val">0.643 composite</strong> (2.44× baseline), with ΔPSNR of +10.75 dB and ΔSSIM of +0.413, demonstrating substantial gains in both pixel-level accuracy and structural fidelity. Inference: ~0.74 s/image (CUDA T4 GPU), ~4.3 s/image (CPU) for full 992×992 images without tiling.
+  Our NAFNet hybrid pipeline achieves <strong class="metric-val">0.643 composite</strong> (2.44× baseline), with ΔPSNR of +10.75 dB and ΔSSIM of +0.413. Inference: ~0.74 s/image (CUDA T4 GPU), ~4.3 s/image (CPU) for full 992×992 images without tiling.
 </p>
 
 <p>
-  <strong>Per-stage contribution:</strong> Defect correction prevents localized CNN artifacts from ~8,758 outliers. Wavelet pre-processing reduces the high-frequency noise floor. NAFNet provides the primary non-linear denoising. Bilateral post-filter refines edge quality.
+  <strong>Per-stage contribution (NAFNet pipeline):</strong> Defect correction prevents localized CNN artifacts from ~8,758 outliers. Wavelet pre-processing reduces the high-frequency noise floor. NAFNet provides the primary non-linear denoising. Bilateral post-filter refines edge quality.
+</p>
+
+<p>
+  Our <strong>Lightweight Restormer</strong> achieves <strong class="metric-val">0.6467 composite</strong> (2.46× baseline) — our highest score. Custom-engineered to fit a 6 GB RTX 4050 GPU with reduced channel widths and blocks. Key components: <strong>MDTA</strong> (Multi-Dconv Head Transposed Attention) for global channel-wise dependencies, and <strong>GDFN</strong> (Gated-Dconv Feed-Forward Network) to suppress noisy activations while enhancing informative features. The same classical post-processing cascade (defect correction → wavelet → bilateral) is applied after the Restormer.
 </p>
 
 <!-- 8. LIMITATIONS & CONCLUSION -->
@@ -323,7 +331,10 @@
 
 <h2>9. Conclusion</h2>
 <p>
-  We presented a hybrid classical-DL denoising pipeline combining adaptive defect correction, BayesShrink wavelet denoising, NAFNet, and bilateral filtering. The approach achieves a composite score of <strong>0.643</strong> (2.44× over baseline 0.263) with practical inference on GPU (~0.74 s) and CPU (~4.3 s). Four classical SP techniques are integrated beyond the baseline. For the final round, improvements include TTA, SSIM-aware loss, and ensembling.
+  We presented two competitive submissions for the Mora SP Cup 2026. Our <strong>NAFNet hybrid pipeline</strong> (adaptive defect correction + BayesShrink wavelet + NAFNet + bilateral filtering) achieves <strong>0.643 composite</strong> (2.44× over baseline), with practical GPU (~0.74 s) and CPU (~4.3 s) inference. Four classical SP techniques are integrated beyond the baseline.
+</p>
+<p>
+  Our <strong>Lightweight Restormer</strong> (Vision Transformer with MDTA + GDFN, custom-engineered for 6 GB VRAM) achieves <strong>0.6467 composite</strong> — our highest result and a 2.46× improvement over baseline. Both submissions use the same classical post-processing cascade. For the final round, improvements include TTA, SSIM-aware loss, and model ensembling across both architectures.
 </p>
 
 </body>
